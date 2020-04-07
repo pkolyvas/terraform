@@ -19,6 +19,8 @@ same limitations as the main backend configuration. You can use any number of
 `remote_state` data sources with differently configured backends, and you can
 use interpolations when configuring them.
 
+-> **Note:** State data should be retreived and used with the same version of Terraform which generated the state data.
+
 ## Example Usage
 
 ```hcl
