@@ -1,0 +1,208 @@
+---
+layout: "guides"
+page_title: "Upgrading to Terraform 0.13"
+sidebar_current: "upgrade-guides-0-13"
+description: |-
+  Upgrading to Terraform v0.13
+
+---
+
+# Upgrading to Terraform v0.13
+
+[Terraform v0.13](https://hashicorp.com/blog/terraform-0-1-2-preview) is focused on bringing `count`, `for_each` and `depends_on` to modules. Terraform v0.13 also brings improvements to provider use, particularly Partner and Community providers. There are some minor changes that you'll need to consider when upgrading. The goal of this guide is to cover the most common upgrade concerns and issues.
+
+For most users, upgrading configuration should be completely automatic. Some simple configurations will require no changes at all, and most other configurations can be prepared by running
+[the automatic upgrade tool](/docs/commands/0.13upgrade.html). Please read on for more information and recommendations on the upgrade process.
+
+-> If you are a developer maintaining a provider plugin, very little has changes. Please see[the documentation on 0.12 compatibility for providers](/docs/extend/terraform-0.12-compatibility.html)
+to learn more about the changes that are required.
+
+
+## Upgrade to Terraform 0.12 first
+
+We strongly recommend completing an upgrade to the latest Terraform v0.12 release first. This will give you an opportunity to address any changes required for the previous major version upgrades separately, rather than making multiple changes at once.
+
+In particular, if you are upgrading from a Terraform version prior to v0.9, you _must_ first [upgrade to Terraform v0.9](/upgrade-guides/0-9.html) and switch to initializing with `terraform init`. Terraform from version v0.12 onward no longer includes the functionality for automatically migrating from the legacy remote state
+mechanism.
+
+This guide focuses on changes from v0.12 to v0.13. Each previous major release has its own upgrade guide, so please consult the other guides (available in the navigation) to upgrade step-by-step to v0.12 first.
+
+Prior versions of Terraform are available from [the releases server](https://releases.hashicorp.com/terraform/).
+
+## Upgrading to Terraform 0.12
+
+Before switching to Terraform 0.13, we recommend using Terraform v0.12.26 (or
+any later v0.11 release) to perform one last `terraform init` and
+`terraform apply` to ensure that everything is initialized and synchronized.
+
+Once `terraform apply` shows no changes pending, switch over to a Terraform
+v0.13 release and run `terraform init` again to upgrade the working directory
+metadata to v0.13 format. (Once you've done this, you'll need to delete the
+`.terraform` directory if you wish to return to Terraform v0.12, but no
+real infrastructure or persisted state will be upgraded yet.)
+
+It is possible that your configuration may be using configuration constructs
+that are not Terraform v0.13 compatible and thus require upgrade. In that case,
+`terraform init` will produce the following message:
+
+```
+Terraform has initialized, but configuration upgrades may be needed.
+
+Terraform found syntax errors in the configuration that prevented full
+initialization. If you've recently upgraded to Terraform v0.12, this may be
+because your configuration uses syntax constructs that are no longer valid,
+and so must be updated before full initialization is possible.
+
+Terraform has installed the required providers to support the configuration
+upgrade process. To begin upgrading your configuration, run the following:
+    terraform 0.12upgrade
+
+To see the full set of errors that led to this message, run:
+    terraform validate
+```
+
+As mentioned in the message, Terraform has partially initialized the directory just enough to perform the configuration upgrade process, which is described in the following section.
+
+We recommend running the configuration upgrade tool even if you do not see the above message, because it may detect and fix constructs that are syntactically correct but still need some changes to work as expected with Terraform v0.13.
+
+## Upgrading Terraform configuration
+
+Terraform v0.13 includes a `terraform 0.13upgrade` command that will
+....
+
+Simple configuration files are likely to be understood by Terraform 0.13 as-is, but we recommend that everyone run the upgrade tool nonetheless. Even if your configuration is already compatible, the tool will update your configuration to use the cleaner syntax available in Terraform 0.12, which should improve readability.
+
+To run the command, first make sure that your local working directory is synced
+with your version control system so that there are no changes outstanding. This
+will make it easier to review the changes that the upgrade tool is proposing,
+using the diff feature of your version control system.
+
+With a fully-initialized working directory (all necessary providers and child
+modules installed), run `terraform 0.13upgrade` to begin the process. By default
+it will print some information about what it is about to do and prompt for
+confirmation:
+
+```
+This command will rewrite the configuration files in the given directory so
+that they use the new syntax features from Terraform v0.12, and will identify
+any constructs that may need to be adjusted for correct operation with
+Terraform v0.12.
+
+We recommend using this command in a clean version control work tree, so that
+you can easily see the proposed changes as a diff against the latest commit.
+If you have uncommitted changes already present, we recommend aborting this
+command and dealing with them before running this command again.
+
+Would you like to upgrade the module in the current directory?
+```
+
+If you answer yes, the `.tf` and `.tfvars` files in your current working
+directory will be rewritten in-place.
+
+The upgrade tool may also print out warnings about constructs it wasn't able to
+migrate fully automatically; in that case, it will also emit comments into the
+rewritten source files containing the special marker `TF-UPGRADE-TODO`, as
+a prompt for a decision you'll need to make to complete the upgrade.
+
+Once the upgrade tool has successfully completed and you've resolved any
+`TF-UPGRADE-TODO` prompts, use your version control tool to review the proposed
+changes and then run `terraform plan` to see the effect of those changes.
+
+In most cases, `terraform plan` should report that no changes are required,
+because the updated configuration is equivalent to before.
+
+The remaining sections below describe both some common changes that the upgrade
+tool is able to make automatically, and some other upgrade situations that
+the configuration tool may not be able to fully resolve. If you encounter
+any errors during the upgrade or during the subsequent `terraform plan`, the
+sections below may give some additional context for how to proceed.
+
+Once you're happy with the updated configuration, commit it to version control
+in the usual way and apply it with Terraform 0.13.
+
+### [WIP] Working with Providers & `required_providers`
+
+### [WIP] Working with `count` on modules
+
+The `count` feature allows declaration of multiple instances of a particular
+resource constructed from the same configuration. In Terraform v0.11, any
+use of `count` would generally lead to referring to the resource in question
+using the "splat expression" syntax elsewhere in the configuration:
+
+```
+aws_instance.example.*.id[0]
+```
+
+Because `aws_instance.example` itself was not directly referencable in
+Terraform v0.11, the expression system allowed some flexibility in how such
+expressions were resolved. For example, Terraform would treat
+`aws_instance.example.id` as an alias for `aws_instance.example.*.id[0]`.
+
+Terraform v0.12 allows referring to an entire resource as an object value,
+but that required making a decision on what type of value is returned by
+`aws_instance.example`. The new rules are as follows:
+
+* For resources where `count` is _not_ set, a reference like
+  `aws_instance.example` returns a single object, whose attributes can be
+  accessed in the usual way, like `aws_instance.example.id`.
+
+* For resources where `count` _is_ set -- even if the expression evaluates to
+  `1` -- `aws_instance.example` returns a list of objects whose length is
+  decided by the count. In this case `aws_instance.example.id` is an error,
+  and must instead be written as `aws_instance.example[0].id` to access
+  one of the objects before retrieving its `id` attribute value.
+
+The splat syntax is still available and will still be useful in situations
+where a list result is needed, but we recommend updating expressions like
+`aws_instance.example.*.id[count.index]` to instead be
+`aws_instance.example[count.index].id`, which should be easier to read and
+understand for those who are familiar with other languages.
+
+Another consequence of the new handling of `count` is that you can use the
+`length` function directly with references to resources that have `count` set:
+
+```
+length(aws_instance.example)
+```
+
+This replaces the v0.11 special case of `aws_instance.example.count`, which
+can no longer be supported due to `aws_instance.example` being a list.
+
+The upgrade tool will automatically detect references that are inconsistent
+with the `count` setting on the target resource and rewrite them to use the
+new syntax. The upgrade tool will _not_ rewrite usage of splat syntax to
+direct index syntax, because the old splat syntax form is still compatible.
+
+Another `count`-related change is that Terraform now requires `count` to be
+assigned a numeric value, and will not automatically convert a boolean value
+to a number in the interests of clarity. If you wish to use a boolean value
+to activate or deactivate a particular resource, use the conditional operator
+to show clearly how the boolean value maps to a number value:
+
+```hcl
+  count = var.enabled ? 1 : 0
+```
+
+##[WIP] Working with `for_each` on modules
+
+##[WIP] Working with `depends_on` on modules
+
+###Change
+
+A prerequisite for supporting depends_on for modules is to also support `depends_on` for data resources declared inside those modules, which requires data resources to be read during the plan phase rather than the refresh phase to properly respect the indicated dependencies.
+
+From an end-user's perspective, this in turn means that `terraform plan -refresh=false` will no longer disable reading data resources, and terraform refresh will no longer read new values for data resources.
+
+###Benefits
+
+Users will now be able to use depends_on both directly on data resources and on calls to modules containing data resources, and Terraform will read them at an appropriate time during either the plan or apply phase to respect the declared dependencies on other resources. [#11806](https://github.com/hashicorp/terraform/issues/11806)
+
+In situations where a data resource configuration depends on a managed resource instance (that is, an instance from a resource block), the data resource configuration will no longer "lag behind" by one change due to data resources being read before the referenced managed resources are planned. [#17034](https://github.com/hashicorp/terraform/issues/17034)
+
+###Mitigation and Upgrade Help
+
+This breaking change will only affect users who have developed custom workflows involving either disabling refresh during planning or forcefully refreshing without creating a plan. Workflows involving a split of refreshing and planning to separate steps are usually associated with very large configurations where refreshing is expensive, or configurations that exist primarily to expose data source results via outputs.
+
+For those with large configurations, note that only the data resource reads have changed behavior in 0.13: managed resource refreshing will still occur during the refresh step. That means that this change will only impact configurations with a large number of data resources; refreshing of large numbers of managed resources can still be skipped using the -refresh=false option to terraform plan.
+
+For configurations that exist primarily to expose data results as outputs, Terraform 0.13 includes an improvement to the terraform plan and terraform apply commands where Terraform will detect changes to either data resources or outputs and consider both to be a plan that can be applied, rather than (as before) immediately exiting with the "No changes" message. This means that configurations of this sort can have their data updated using the normal terraform plan / terraform apply workflow, instead of terraform refresh. 
